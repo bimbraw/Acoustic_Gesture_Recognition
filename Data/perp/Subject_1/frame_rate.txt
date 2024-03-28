@@ -1,1 +1,0 @@
--15.811067233203557 Hz126.23300309999999 s5 rounds, 2 classes with a length of 100 per class for configuration: perp
