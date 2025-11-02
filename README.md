@@ -1,1 +1,1 @@
-Code for SPIE Medical Imaging paper's journal paper version
+Code for IEEE Sensors Journal paper titled 'Acoustic Reflector Based Forearm Ultrasound for Hand Gesture Classification' (Under Preparation)
