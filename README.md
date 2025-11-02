@@ -1,6 +1,6 @@
 Code for IEEE Sensors Journal paper titled 'Acoustic Reflector Based Forearm Ultrasound for Hand Gesture Classification' (Under Preparation)
 
-Please cite this dataset together with the associated publication when used in academic or industrial research. Here is the plain text citation:
+If you are using this repo, please cite it along with the dataset and the associated publication when used in academic or industrial research. Here is the plain text citation:
 K. Bimbraw, Y. Tang and H. K. Zhang, "Acoustic Reflector Based Forearm Ultrasound for Hand Gesture Classification," in IEEE Sensors Journal, doi: 10.1109/JSEN.2025.3621577. 
 
 Here is the BibTeX:
