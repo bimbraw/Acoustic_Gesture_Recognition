@@ -1,0 +1,293 @@
+#Author - Keshav Bimbraw
+
+import os
+import json
+import argparse
+import numpy as np
+import tensorflow as tf
+from tensorflow import keras
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix
+import matplotlib.pyplot as plt
+from tqdm.auto import tqdm
+
+# ----------------------------
+# Helpers
+# ----------------------------
+def set_seed(seed: int):
+    import random
+    random.seed(seed)
+    np.random.seed(seed)
+    tf.random.set_seed(seed)
+
+def ensure_dir(path_or_file):
+    if not path_or_file:
+        return
+    d = path_or_file if os.path.isdir(path_or_file) else os.path.dirname(path_or_file)
+    if d:
+        os.makedirs(d, exist_ok=True)
+
+def save_confusion_matrix_png(y_true, y_pred, path):
+    if not path:
+        return
+    ensure_dir(path)
+    cm = confusion_matrix(y_true, y_pred)
+    fig, ax = plt.subplots()
+    im = ax.imshow(cm, interpolation="nearest")
+    ax.set_title("Confusion Matrix")
+    fig.colorbar(im, ax=ax)
+    ax.set_xlabel("Predicted")
+    ax.set_ylabel("True")
+    fig.tight_layout()
+    plt.savefig(path, dpi=150)
+    plt.close(fig)
+
+def dump_json(obj, path):
+    if not path:
+        return
+    ensure_dir(path)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f, indent=2)
+
+# ----------------------------
+# tqdm progress (epoch + batch bars)
+# ----------------------------
+class TqdmProgress(keras.callbacks.Callback):
+    def __init__(self, enable=True):
+        super().__init__()
+        self.enable = enable
+        self.epoch_bar = None
+        self.batch_bar = None
+
+    def on_train_begin(self, logs=None):
+        if not self.enable: return
+        total_epochs = self.params.get("epochs", None)
+        self.epoch_bar = tqdm(total=total_epochs, desc="Epochs", position=0, leave=True)
+
+    def on_epoch_begin(self, epoch, logs=None):
+        if not self.enable: return
+        total_steps = self.params.get("steps", None)
+        self.batch_bar = tqdm(total=total_steps, desc=f"Epoch {epoch+1}/{self.params.get('epochs','?')}",
+                              position=1, leave=False)
+
+    def on_train_batch_end(self, batch, logs=None):
+        if not self.enable or self.batch_bar is None: return
+        self.batch_bar.update(1)
+        if logs:
+            self.batch_bar.set_postfix({
+                "loss": f"{logs.get('loss', 0):.4f}",
+                "acc": f"{logs.get('accuracy', 0):.4f}"
+            })
+
+    def on_epoch_end(self, epoch, logs=None):
+        if not self.enable: return
+        if self.batch_bar is not None:
+            self.batch_bar.close()
+            self.batch_bar = None
+        if logs:
+            tqdm.write(
+                f"Epoch {epoch+1} done | "
+                f"loss={logs.get('loss', 0):.4f} "
+                f"acc={logs.get('accuracy', 0):.4f} "
+                f"val_loss={logs.get('val_loss', 0):.4f} "
+                f"val_acc={logs.get('val_accuracy', 0):.4f}"
+            )
+        if self.epoch_bar is not None:
+            self.epoch_bar.update(1)
+
+    def on_train_end(self, logs=None):
+        if self.batch_bar is not None:
+            self.batch_bar.close()
+        if self.epoch_bar is not None:
+            self.epoch_bar.close()
+
+# ----------------------------
+# Data loading
+# ----------------------------
+def load_subject_arrays(root, mode, subject, image_size):
+    d = os.path.join(root, mode, subject)
+    x_train = np.load(os.path.join(d, "X_m_train.npy"))
+    x_test  = np.load(os.path.join(d, "X_m_test.npy"))
+    y_train = np.load(os.path.join(d, "y_m_train.npy"))
+    y_test  = np.load(os.path.join(d, "y_m_test.npy"))
+
+    y_train = y_train.astype(np.int64).ravel()
+    y_test  = y_test.astype(np.int64).ravel()
+
+    # Ensure channel dim (N,H,W,1)
+    if x_train.ndim == 3: x_train = x_train[..., np.newaxis]
+    if x_test.ndim  == 3: x_test  = x_test[..., np.newaxis]
+
+    # Resize to image_size (keeps your ViT/CNN parity if you want 320)
+    x_train = tf.image.resize(tf.convert_to_tensor(x_train), (image_size, image_size)).numpy()
+    x_test  = tf.image.resize(tf.convert_to_tensor(x_test ), (image_size, image_size)).numpy()
+
+    # Normalize to [0,1]
+    if x_train.dtype != np.float32:
+        x_train = x_train.astype("float32"); x_test = x_test.astype("float32")
+    maxv = max(float(x_train.max()), 1.0)
+    x_train /= maxv; x_test /= maxv
+
+    num_classes = int(max(y_train.max(), y_test.max()) + 1)
+    return (x_train, y_train), (x_test, y_test), num_classes
+
+# ----------------------------
+# CNN model
+# ----------------------------
+def build_cnn(input_shape, num_classes,
+              filters=(16, 16, 16, 16, 16), kernel_size=3, pool_size=2,
+              dense_units=64, dropout=0.5, lr=1e-3):
+    """
+    A lightweight 2D CNN stack similar to your original:
+      [Conv-BN-ReLU + MaxPool] x L  ->  Flatten -> Dense -> Dropout -> Softmax
+    """
+    chan_dim = -1
+    inputs = keras.layers.Input(shape=input_shape)
+    x = inputs
+    for f in filters:
+        x = keras.layers.Conv2D(f, (kernel_size, kernel_size), padding="same", activation="relu")(x)
+        x = keras.layers.BatchNormalization(axis=chan_dim)(x)
+        x = keras.layers.MaxPooling2D(pool_size=(pool_size, pool_size))(x)
+
+    x = keras.layers.Flatten()(x)
+    x = keras.layers.Dense(dense_units, activation="relu")(x)
+    x = keras.layers.BatchNormalization(axis=chan_dim)(x)
+    x = keras.layers.Dropout(dropout)(x)
+
+    outputs = keras.layers.Dense(num_classes)(x)  # logits
+    model = keras.Model(inputs, outputs)
+    model.compile(
+        optimizer=keras.optimizers.Adam(learning_rate=lr),
+        loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+        metrics=[keras.metrics.SparseCategoricalAccuracy(name="accuracy")],
+    )
+    return model
+
+# ----------------------------
+# Main
+# ----------------------------
+def main():
+    ap = argparse.ArgumentParser(description="CNN gesture classifier (single subject) with progress bars + metrics.")
+    # Paths / data
+    ap.add_argument("--root", type=str,
+        default=r"C:\Users\bimbr\Documents\Mirror_Paper\Data_Upload",
+        help="Root folder containing 'mirror' and 'perp'.")
+    ap.add_argument("--mode", type=str, choices=["mirror", "perp"], default="mirror",
+        help="Dataset mode: mirror or perp.")
+    ap.add_argument("--subject", type=str, default="Subject_1",
+        help="Subject folder name.")
+    ap.add_argument("--image-size", type=int, default=320,
+        help="Model input size (pixels).")
+    # Training
+    ap.add_argument("--epochs", type=int, default=5, help="Number of training epochs.")
+    ap.add_argument("--batch-size", type=int, default=64, help="Batch size.")
+    ap.add_argument("--seed", type=int, default=42, help="Random seed.")
+    ap.add_argument("--val-split", type=float, default=0.1, help="Validation split from training set.")
+    ap.add_argument("--progress", type=str, choices=["tqdm", "none"], default="tqdm",
+        help="tqdm progress bars (tqdm) or Keras logs only (none).")
+    # Model knobs (optional)
+    ap.add_argument("--filters", type=int, nargs="+", default=[16,16,16,16,16], help="Conv filters per block.")
+    ap.add_argument("--dense", type=int, default=64, help="Units in the penultimate dense layer.")
+    ap.add_argument("--dropout", type=float, default=0.5, help="Dropout rate.")
+    ap.add_argument("--lr", type=float, default=1e-3, help="Adam learning rate.")
+    # Save / load
+    ap.add_argument("--load-model", type=str, default="", help="Path to an existing .keras model to load (skip training if provided).")
+    ap.add_argument("--save-model", type=str, default="", help="Path to save trained model, e.g., results/cnn_mirror_subject1.keras")
+    ap.add_argument("--out", type=str, default="", help="Path to save metrics JSON, e.g., results/subject1_cnn.json")
+    ap.add_argument("--cm", type=str, default="", help="Path to save confusion matrix PNG, e.g., results/figs/subject1_cnn_cm.png")
+
+    args = ap.parse_args()
+    set_seed(args.seed)
+
+    # Load data
+    (x_train, y_train), (x_test, y_test), num_classes = load_subject_arrays(
+        args.root, args.mode, args.subject, args.image_size
+    )
+    input_shape = (args.image_size, args.image_size, 1)
+
+    # Build or load
+    if args.load_model and os.path.isfile(args.load_model):
+        print(f"Loading model from: {args.load_model}")
+        model = keras.models.load_model(args.load_model, compile=False)
+        model.compile(
+            optimizer=keras.optimizers.Adam(learning_rate=args.lr),
+            loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+            metrics=[keras.metrics.SparseCategoricalAccuracy(name="accuracy")],
+        )
+        trained = True
+    else:
+        model = build_cnn(
+            input_shape=input_shape, num_classes=num_classes,
+            filters=tuple(args.filters), dense_units=args.dense,
+            dropout=args.dropout, lr=args.lr
+        )
+        trained = False
+
+    # Progress setup
+    callbacks = []
+    verbose = 0 if args.progress == "tqdm" else 2
+    if args.progress == "tqdm":
+        callbacks.append(TqdmProgress(enable=True))
+
+    # Train
+    if not trained:
+        history = model.fit(
+            x_train, y_train,
+            batch_size=args.batch_size,
+            epochs=args.epochs,
+            validation_split=args.val_split,
+            callbacks=callbacks,
+            verbose=verbose
+        )
+
+    # Evaluate
+    logits = model.predict(x_test, verbose=0)
+    y_pred = np.argmax(logits, axis=1)
+
+    acc = accuracy_score(y_test, y_pred)
+    prec, rec, f1, _ = precision_recall_fscore_support(
+        y_test, y_pred, average="macro", zero_division=0
+    )
+
+    print(f"\n[{args.mode}/{args.subject}] Test Accuracy: {acc:.4f}")
+    print(f"[{args.mode}/{args.subject}] Macro Precision: {prec:.4f}  Macro Recall: {rec:.4f}  Macro F1: {f1:.4f}")
+
+    # Save artifacts
+    if args.cm:
+        save_confusion_matrix_png(y_test, y_pred, args.cm)
+        print(f"Saved confusion matrix to: {args.cm}")
+
+    if args.save_model:
+        ensure_dir(args.save_model)
+        model.save(args.save_model)
+        print(f"Saved model to: {args.save_model}")
+
+    if args.out:
+        result = {
+            "model": "cnn",
+            "mode": args.mode,
+            "subject": args.subject,
+            "n_classes": int(num_classes),
+            "metrics": {
+                "accuracy": float(acc),
+                "precision_macro": float(prec),
+                "recall_macro": float(rec),
+                "f1_macro": float(f1),
+            },
+            "confusion_matrix_path": args.cm if args.cm else "",
+            "params": {
+                "image_size": args.image_size,
+                "epochs": args.epochs,
+                "batch_size": args.batch_size,
+                "seed": args.seed,
+                "val_split": args.val_split,
+                "filters": args.filters,
+                "dense": args.dense,
+                "dropout": args.dropout,
+                "lr": args.lr,
+            },
+        }
+        dump_json(result, args.out)
+        print(f"Saved metrics JSON to: {args.out}")
+
+if __name__ == "__main__":
+    main()
