@@ -27,6 +27,5 @@ And here is the bibtex:
   volume={12932},
   pages={218--222},
   year={2024},
-  organization={SPIE}
-}
+  organization={SPIE}}
 ```
