@@ -1,4 +1,4 @@
-# Acoustic Reflector Based Forearm Ultrasound for Hand Gesture Classification — Code
+# Acoustic Reflector Based Forearm Ultrasound for Hand Gesture Classification Starter Code
 
 ![graphical_abstract](https://github.com/user-attachments/assets/f06ce2c3-a7fc-49da-8679-b959789bc728)
 
