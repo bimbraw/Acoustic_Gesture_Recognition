@@ -115,7 +115,7 @@ python ultrasound_gesture_cnn_classification.py --mode mirror --subject Subject_
 python ultrasound_gesture_vit_classification.py --mode mirror --subject Subject_1 --epochs 5 --batch-size 64 --save-model results\vit_mirror_subject1.keras --out results\subject1_vit_mirror.json --cm results\figs\subject1_vit_mirror_cm.png
 ```
 ## Notes
-- For faithful reproduction, match the data splits and hyperparameters reported in the paper. The runner scripts ship with sensible defaults aligned to the study.
+- For faithful reproduction, match the data splits and hyperparameters reported in the paper.
 - Training time varies by hardware. ViT typically needs multiple epochs; SVM (linear/RBF) may require many iterations. Expect anything from minutes to hours depending on CPU/GPU.
 - ViT benefits from a GPU; SVM runs on CPU. Results are comparable across systems, but wall-clock time will differ.
 - Full computation details (preprocessing, model settings, and evaluation protocol) are documented in the paper.
