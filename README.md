@@ -1,6 +1,9 @@
 # Acoustic Reflector Based Forearm Ultrasound for Hand Gesture Classification — Code
 
+![graphical_abstract](https://github.com/user-attachments/assets/f06ce2c3-a7fc-49da-8679-b959789bc728)
+
 This repository contains reference implementations and runner scripts accompanying our IEEE Sensors Journal article on acoustic-reflector–assisted forearm ultrasound for hand-gesture classification.  
+
 If you use this code (or any derived artifacts), **please cite both the paper and the dataset**.
 
 ## Paper citation
