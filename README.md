@@ -18,8 +18,6 @@ If you use this code (or any derived artifacts), **please cite both the paper an
   journal = {IEEE Sensors Journal},
   title   = {Acoustic Reflector Based Forearm Ultrasound for Hand Gesture Classification},
   year    = {2025},
-  volume  = {},
-  number  = {},
   pages   = {1--1},
   doi     = {10.1109/JSEN.2025.3621577}
 }
